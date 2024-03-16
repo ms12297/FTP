@@ -53,6 +53,11 @@ int main()
 			{
 				bzero(buffer,sizeof(buffer)); //clear the buffer
 				int bytes = recv(client_sd,buffer,sizeof(buffer),0); //receive message from client
+				if (bytes == 0) {
+					printf("\nConnection [%d] closed\n", client_sd);
+					close(client_sd);
+					break;
+				}
 
 				// printing the message received from and to be sent to client
 				printf("[%s:%d] Received message: %s\n", inet_ntoa(cliaddr.sin_addr),ntohs(cliaddr.sin_port),buffer);
