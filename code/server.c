@@ -7,6 +7,29 @@
 #include<unistd.h>
 #include<stdlib.h>
 
+
+int active_users = 0; // number of active users
+
+// create a struct called user with fields username, password, wd (working directory)
+struct user {
+	char username[256];
+	char password[256];
+	char wd[256];
+};
+
+// create an array of users
+struct user users[10];
+
+// function to authenticate the user
+int user_auth(int client_socket, char username[256]) {
+	// reading csv and storing user
+	// then verifying auth, user first then password
+	// print username
+	// printf("Username: %s\n", username);
+	return 1; // return 0 for error
+}
+
+
 int main()
 {
 	//socket
@@ -44,11 +67,15 @@ int main()
 	while(1) {
 		//accept
 		int client_sd = accept(server_sd,(struct sockaddr *) &cliaddr, &len);	
-		printf("[%s:%d] Connected\n", inet_ntoa(cliaddr.sin_addr),ntohs(cliaddr.sin_port));	
+
+		// print connection details
+		printf("Connection established with user %d\n", client_sd);
+		printf("Their port: %d\n", ntohs(cliaddr.sin_port));
 		
 		int pid = fork(); //fork a child process
 		if(pid == 0) { //if it is the child process
 		 	char buffer[256];
+			int userIdx = -1; // initializing
 			while(1)
 			{
 				bzero(buffer,sizeof(buffer)); //clear the buffer
@@ -58,18 +85,40 @@ int main()
 					close(client_sd);
 					break;
 				}
+				printf("\n[%d]> %s\n", client_sd, buffer);
 
-				// printing the message received from and to be sent to client
-				printf("[%s:%d] Received message: %s\n", inet_ntoa(cliaddr.sin_addr),ntohs(cliaddr.sin_port),buffer);
-
-				if (strcmp(buffer,"BYE!")==0) { //if user types BYE! then close the connection
-					printf("[%s:%d] Disconnected\n", inet_ntoa(cliaddr.sin_addr),ntohs(cliaddr.sin_port));
-					close(client_sd);
-					exit(0); // terminate this client's process
+				// if the command is "USER <username>", authenticate the user
+				if (strncmp(buffer, "USER ", 5) == 0) {
+					char *username = buffer + 5;
+					username[strcspn(username, "\n")] = 0; // remove trailing newline char from username
+					if (user_auth(client_sd, username) == 1) {
+						userIdx = active_users - 1;
+						// setting cwd as this user's working directory
+						chdir(users[userIdx].wd);
+						// printf("LOGGED IN\n");
+						// printf("Working directory: %s\n", users[userIdx].wd);
+						strcpy(buffer, "230 User logged in, proceed.");
+						send(client_sd, buffer, sizeof(buffer), 0);
+					}
 				}
 
-				printf("[%s:%d] Sending message: %s\n", inet_ntoa(cliaddr.sin_addr),ntohs(cliaddr.sin_port),buffer);
-				int count = send(client_sd,buffer,sizeof(buffer),0);
+				// if the command is "BYE!", close the connection
+				else if(strcmp(buffer, "QUIT") == 0) {
+					printf("Connection [%d] closed\n", client_sd);
+					bzero(buffer,sizeof(buffer)); //clear the buffer
+					strcpy(buffer, "221 Service closing control connection.");
+					send(client_sd,buffer,sizeof(buffer),0); //send message to client
+					close(client_sd);
+					break;
+				}
+
+				else { // if the command is invalid
+					bzero(buffer, sizeof(buffer));
+					printf("Invalid command\n");
+					strcpy(buffer, "202 Command not implemented.");
+					send(client_sd, buffer, sizeof(buffer), 0);
+				}
+				
 			}
 		}
 		// nothing else to be done in the parent process so loop back to accept another client
