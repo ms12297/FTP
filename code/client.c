@@ -38,12 +38,22 @@ int main()
 
 	while(1)
 	{
+		// changing cwd to client folder
+		chdir("../client");
+
 		printf("ftp> ");
 		fgets(buffer,sizeof(buffer),stdin); //get input from user
 		buffer[strcspn(buffer, "\n")] = 0;  //remove trailing newline char from buffer, fgets does not remove it
 
 		// if command is "USER", but login is 1, set login to 0
 		if (strncmp(buffer, "USER ", 5) == 0 ) {
+			send(server_sd,buffer,strlen(buffer),0);
+			bzero(buffer,sizeof(buffer)); //clear the buffer
+			recv(server_sd,buffer,sizeof(buffer),0); //receive message from server
+			printf("%s\n",buffer);
+		}
+
+		else if (strncmp(buffer, "PASS ", 5) == 0) {
 			send(server_sd,buffer,strlen(buffer),0);
 			bzero(buffer,sizeof(buffer)); //clear the buffer
 			recv(server_sd,buffer,sizeof(buffer),0); //receive message from server
@@ -57,6 +67,15 @@ int main()
 			printf("%s\n",buffer);
 			close(server_sd);
 			break;
+		}
+
+		// !LIST, !PWD, and !CWD locally through system() command
+		else if (strcmp(buffer, "!LIST") == 0) {
+			system("ls");
+		}
+
+		else if (strcmp(buffer, "!PWD") == 0) {
+			system("pwd");
 		}
 
 		// if command is anything else, send anyway to receive error
