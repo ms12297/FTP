@@ -6,6 +6,7 @@
 #include <netinet/in.h>
 #include<unistd.h>
 #include<stdlib.h>
+#include <sys/select.h>
 
 
 int active_users = 0; // number of active users
@@ -111,7 +112,7 @@ int main()
 	struct sockaddr_in server_addr;
 	bzero(&server_addr,sizeof(server_addr));
 	server_addr.sin_family = AF_INET;
-	server_addr.sin_port = htons(6000); // specified port
+	server_addr.sin_port = htons(9021); // specified port
 	server_addr.sin_addr.s_addr = inet_addr("127.0.0.1"); // loopback address
 
 	//bind
@@ -126,107 +127,139 @@ int main()
 		exit(-1);
 	}
 
+	// DECLARE 2 fd sets (file descriptor sets : a collection of file descriptors)
+	fd_set all_sockets;
+	fd_set ready_sockets;
+
+	// zero out/iniitalize our set of all sockets
+	FD_ZERO(&all_sockets);
+
+	// adds one socket (the current socket) to the fd set of all sockets
+	FD_SET(server_sd,&all_sockets);
+
 	// client address
 	struct sockaddr_in cliaddr;
     bzero(&cliaddr,sizeof(cliaddr));
     unsigned int len = sizeof(cliaddr);
 
+	int userIdx = -1; // initializing the user index
+
 	while(1) {
-		//accept
-		int client_sd = accept(server_sd,(struct sockaddr *) &cliaddr, &len);	
 
-		// print connection details
-		printf("Connection established with user %d\n", client_sd);
-		printf("Their port: %d\n", ntohs(cliaddr.sin_port));
-		
-		int pid = fork(); //fork a child process
-		if(pid == 0) { //if it is the child process
-		 	char buffer[256];
-			int userIdx = -1; // initializing
-			while(1)
+		// so that is why each iteration of the loop, we copy the all_sockets set into that temp fd_set
+		ready_sockets = all_sockets;
+
+		if(select(FD_SETSIZE,&ready_sockets,NULL,NULL,NULL)<0)
+		{
+			perror("select error");
+			exit(EXIT_FAILURE);
+		}
+
+		for(int fd = 0 ; fd < FD_SETSIZE; fd++)
+		{
+			// check to see if that fd is SET
+			if(FD_ISSET(fd,&ready_sockets))
 			{
-				bzero(buffer,sizeof(buffer)); //clear the buffer
-				int bytes = recv(client_sd,buffer,sizeof(buffer),0); //receive message from client
-				if (bytes == 0) {
-					printf("\nConnection [%d] closed\n", client_sd);
-					close(client_sd);
-					break;
-				}
-				printf("\n[%d]> %s\n", client_sd, buffer);
-
-				// if the command is "USER <username>", authenticate the user
-				if (strncmp(buffer, "USER ", 5) == 0) {
-					char *username = buffer + 5;
-					username[strcspn(username, "\n")] = 0; // remove trailing newline char from username
-					if (user_auth(client_sd, username) == 1) {
-						userIdx = active_users - 1;
-						// setting cwd as this user's working directory
-						chdir(users[userIdx].wd);
-					}
+				// if fd is our server socket, this means it is telling us there is a NEW CONNECTION that we can accept
+				if(fd==server_sd)
+				{
+					// accept that new connection
+					int client_sd = accept(server_sd,(struct sockaddr *) &cliaddr, &len);
+					
+					// print connection details
+					printf("Connection established with user %d\n", client_sd);
+					printf("Their port: %d\n", ntohs(cliaddr.sin_port));
+					
+					// add the newly accepted socket to the set of all sockets that we are watching
+					FD_SET(client_sd,&all_sockets);
 				}
 
-				// if the command is "BYE!", close the connection
-				else if(strcmp(buffer, "QUIT") == 0) {
-					printf("Connection [%d] closed\n", client_sd);
+				// handling client connection
+				else
+				{
+					char buffer[256];
 					bzero(buffer,sizeof(buffer)); //clear the buffer
-					strcpy(buffer, "221 Service closing control connection.");
-					send(client_sd,buffer,sizeof(buffer),0); //send message to client
-					close(client_sd);
-					break;
-				}
-
-				else if (strcmp(buffer, "PWD") == 0) {
-					bzero(buffer, sizeof(buffer));
-					if (users[userIdx].logIn == 1) {
-						printf("Working directory: %s\n", users[userIdx].wd);
-						strcpy(buffer, "257 ");
-						strcat(buffer, users[userIdx].wd);
-						send(client_sd, buffer, sizeof(buffer), 0);
+					int bytes = recv(fd,buffer,sizeof(buffer),0); //receive message from client
+					if (bytes == 0) {
+						printf("\nConnection [%d] closed\n", fd);
+						close(fd);
+						break;
 					}
-					else {
-						printf("Not logged in\n");
-						strcpy(buffer, "530 Not logged in.");
-						send(client_sd, buffer, sizeof(buffer), 0);
-					}
-				}
+					printf("\n[%d]> %s\n", fd, buffer);
 
-				else if (strncmp(buffer, "CWD ", 4) == 0) {
-					if (users[userIdx].logIn == 1) {
-						char *new_wd = buffer + 4;
-						// new_wd[strcspn(new_wd, "\n")] = 0; // remove trailing newline char from dir
-						if (chdir(new_wd) == 0) {
-							char dir[256];
-							getcwd(dir, sizeof(dir));
-							printf("Changing directory to: %s\n", dir);
-							bzero(users[userIdx].wd, sizeof(users[userIdx].wd));
-							strcpy(users[userIdx].wd, dir);
-							bzero(buffer, sizeof(buffer));
-							strcpy(buffer, "200 directory changed to ");
-							strcat(buffer, dir);
-							send(client_sd, buffer, sizeof(buffer), 0);
+					// if the command is "USER <username>", authenticate the user
+					if (strncmp(buffer, "USER ", 5) == 0) {
+						char *username = buffer + 5;
+						username[strcspn(username, "\n")] = 0; // remove trailing newline char from username
+						if (user_auth(fd, username) == 1) {
+							userIdx = active_users - 1;
+							// setting cwd as this user's working directory
+							chdir(users[userIdx].wd);
+						}
+					}
+
+					// if the command is "BYE!", close the connection
+					else if(strcmp(buffer, "QUIT") == 0) {
+						printf("Connection [%d] closed\n", fd);
+						bzero(buffer,sizeof(buffer)); //clear the buffer
+						strcpy(buffer, "221 Service closing control connection.");
+						send(fd,buffer,sizeof(buffer),0); //send message to client
+						close(fd);
+						break;
+					}
+
+					else if (strcmp(buffer, "PWD") == 0) {
+						bzero(buffer, sizeof(buffer));
+						if (users[userIdx].logIn == 1) {
+							printf("Working directory: %s\n", users[userIdx].wd);
+							strcpy(buffer, "257 ");
+							strcat(buffer, users[userIdx].wd);
+							send(fd, buffer, sizeof(buffer), 0);
+						}
+						else {
+							printf("Not logged in\n");
+							strcpy(buffer, "530 Not logged in.");
+							send(fd, buffer, sizeof(buffer), 0);
+						}
+					}
+
+					else if (strncmp(buffer, "CWD ", 4) == 0) {
+						if (users[userIdx].logIn == 1) {
+							char *new_wd = buffer + 4;
+							// new_wd[strcspn(new_wd, "\n")] = 0; // remove trailing newline char from dir
+							if (chdir(new_wd) == 0) {
+								char dir[256];
+								getcwd(dir, sizeof(dir));
+								printf("Changing directory to: %s\n", dir);
+								bzero(users[userIdx].wd, sizeof(users[userIdx].wd));
+								strcpy(users[userIdx].wd, dir);
+								bzero(buffer, sizeof(buffer));
+								strcpy(buffer, "200 directory changed to ");
+								strcat(buffer, dir);
+								send(fd, buffer, sizeof(buffer), 0);
+							}
+							else {
+								bzero(buffer, sizeof(buffer));
+								printf("Failed to change working directory\n");
+								strcpy(buffer, "550 No such file or directory.");
+								send(fd, buffer, sizeof(buffer), 0);
+							}
 						}
 						else {
 							bzero(buffer, sizeof(buffer));
-							printf("Failed to change working directory\n");
-							strcpy(buffer, "550 No such file or directory.");
-							send(client_sd, buffer, sizeof(buffer), 0);
+							printf("Not logged in\n");
+							strcpy(buffer, "530 Not logged in.");
+							send(fd, buffer, sizeof(buffer), 0);
 						}
 					}
-					else {
+
+					else { // if the command is invalid
 						bzero(buffer, sizeof(buffer));
-						printf("Not logged in\n");
-						strcpy(buffer, "530 Not logged in.");
-						send(client_sd, buffer, sizeof(buffer), 0);
+						printf("Invalid command\n");
+						strcpy(buffer, "202 Command not implemented.");
+						send(fd, buffer, sizeof(buffer), 0);
 					}
 				}
-
-				else { // if the command is invalid
-					bzero(buffer, sizeof(buffer));
-					printf("Invalid command\n");
-					strcpy(buffer, "202 Command not implemented.");
-					send(client_sd, buffer, sizeof(buffer), 0);
-				}
-				
 			}
 		}
 		// nothing else to be done in the parent process so loop back to accept another client
