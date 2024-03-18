@@ -38,23 +38,34 @@ int main()
 
 	while(1)
 	{
-		printf("Enter a message: ");
+		printf("ftp> ");
 		fgets(buffer,sizeof(buffer),stdin); //get input from user
 		buffer[strcspn(buffer, "\n")] = 0;  //remove trailing newline char from buffer, fgets does not remove it
 
-		if(strcmp(buffer,"BYE!")==0) { //if user types BYE! then close the connection
-			// printf("closing the connection to server \n");
-			int end = send(server_sd,buffer,strlen(buffer),0);
+		// if command is "USER", but login is 1, set login to 0
+		if (strncmp(buffer, "USER ", 5) == 0 ) {
+			send(server_sd,buffer,strlen(buffer),0);
+			bzero(buffer,sizeof(buffer)); //clear the buffer
+			recv(server_sd,buffer,sizeof(buffer),0); //receive message from server
+			printf("%s\n",buffer);
+		}
+
+		else if (strcmp(buffer, "QUIT") == 0) { //if user types QUIT then close the connection
+			send(server_sd,buffer,strlen(buffer),0);
+			bzero(buffer,sizeof(buffer)); //clear the buffer
+			recv(server_sd,buffer,sizeof(buffer),0); //receive message from server
+			printf("%s\n",buffer);
 			close(server_sd);
 			break;
 		}
-		if(send(server_sd,buffer,strlen(buffer),0)<0) { //send message to server
-			perror("send");
-			exit(-1);
+
+		// if command is anything else, send anyway to receive error
+		else {
+			send(server_sd,buffer,strlen(buffer),0);
+			bzero(buffer,sizeof(buffer)); //clear the buffer
+			recv(server_sd,buffer,sizeof(buffer),0); //receive message from server
+			printf("%s\n",buffer);
 		}
-		bzero(buffer,sizeof(buffer)); //clear the buffer
-		int bytes = recv(server_sd,buffer,sizeof(buffer),0); //receive message from server
-		printf("Server response: %s\n",buffer);
 	}
 
 	close(server_sd);
