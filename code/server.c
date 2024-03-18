@@ -15,6 +15,7 @@ struct user {
 	char username[256];
 	char password[256];
 	char wd[256];
+	int logIn;
 };
 
 // create an array of users
@@ -22,11 +23,77 @@ struct user users[10];
 
 // function to authenticate the user
 int user_auth(int client_socket, char username[256]) {
-	// reading csv and storing user
-	// then verifying auth, user first then password
-	// print username
-	// printf("Username: %s\n", username);
-	return 1; // return 0 for error
+	// open the file ../users.csv
+	FILE *file = fopen("../users.csv", "r");
+	if (file == NULL) {
+		perror("fopen");
+		exit(-1);
+	}
+	// read the file line by line
+	char line[256];
+	while (fgets(line, sizeof(line), file)) {
+		// split the line into username and password
+		char *token = strtok(line, ",");
+		char *username_file = token;
+		token = strtok(NULL, ",");
+		char *password_file = token;
+		// if the username is valid, request for password
+		if (strcmp(username, username_file) == 0) {
+			printf("\nSuccessful username verification\n");
+			char buffer[256];
+			bzero(buffer, sizeof(buffer));
+			strcpy(buffer, "331 Username OK, need password.");
+			send(client_socket, buffer, sizeof(buffer), 0);
+			
+			// now receive the password from the client, if any other command is received, return error
+			bzero(buffer, sizeof(buffer));
+			recv(client_socket, buffer, sizeof(buffer), 0);
+			printf("\n[%d]> %s\n", client_socket, buffer);
+
+			if (strncmp(buffer, "PASS ", 5) == 0) {
+				char *password = buffer + 5; // extract the password from the buffer
+				password[strcspn(password, "\n")] = 0; // remove trailing newline char from password
+				password_file[strcspn(password_file, "\n")] = 0; // remove trailing newline char from password_file
+				if (strcmp(password, password_file) == 0) {
+					printf("Successful login\n");
+					char buffer[256];
+					bzero(buffer, sizeof(buffer));
+					strcpy(buffer, "230 User logged in, proceed.");
+					send(client_socket, buffer, sizeof(buffer), 0);
+					fclose(file);
+
+					// adding the user to the users array
+					strcpy(users[active_users].username, username);
+					strcpy(users[active_users].password, password);
+
+					// cwd is dir/code but we assign cwd as dir/server/<username> for this user
+					char cwd[256];
+					getcwd(cwd, sizeof(cwd));
+					char *last_slash = strrchr(cwd, '/'); // find the last slash in the cwd
+					*last_slash = 0; // removing the "code" in current wd
+					strcat(cwd, "/server/");
+					strcat(cwd, username);
+					strcpy(users[active_users].wd, cwd);
+					users[active_users].logIn = 1;
+					active_users++;
+					return 1;
+				}
+				else {
+					printf("Incorrect password\n");
+					break; // if the password is incorrect, break the loop
+				}
+			}
+			printf("Invalid command\n");
+			break; // if the command is invalid, break the loop
+		}
+	}
+	char buffer[256];
+	bzero(buffer, sizeof(buffer));
+	strcpy(buffer, "530 Not logged in.");
+	send(client_socket, buffer, sizeof(buffer), 0);
+
+	fclose(file);
+	return 0;
 }
 
 
@@ -95,10 +162,6 @@ int main()
 						userIdx = active_users - 1;
 						// setting cwd as this user's working directory
 						chdir(users[userIdx].wd);
-						// printf("LOGGED IN\n");
-						// printf("Working directory: %s\n", users[userIdx].wd);
-						strcpy(buffer, "230 User logged in, proceed.");
-						send(client_sd, buffer, sizeof(buffer), 0);
 					}
 				}
 
