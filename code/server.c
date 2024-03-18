@@ -175,6 +175,51 @@ int main()
 					break;
 				}
 
+				else if (strcmp(buffer, "PWD") == 0) {
+					bzero(buffer, sizeof(buffer));
+					if (users[userIdx].logIn == 1) {
+						printf("Working directory: %s\n", users[userIdx].wd);
+						strcpy(buffer, "257 ");
+						strcat(buffer, users[userIdx].wd);
+						send(client_sd, buffer, sizeof(buffer), 0);
+					}
+					else {
+						printf("Not logged in\n");
+						strcpy(buffer, "530 Not logged in.");
+						send(client_sd, buffer, sizeof(buffer), 0);
+					}
+				}
+
+				else if (strncmp(buffer, "CWD ", 4) == 0) {
+					if (users[userIdx].logIn == 1) {
+						char *new_wd = buffer + 4;
+						// new_wd[strcspn(new_wd, "\n")] = 0; // remove trailing newline char from dir
+						if (chdir(new_wd) == 0) {
+							char dir[256];
+							getcwd(dir, sizeof(dir));
+							printf("Changing directory to: %s\n", dir);
+							bzero(users[userIdx].wd, sizeof(users[userIdx].wd));
+							strcpy(users[userIdx].wd, dir);
+							bzero(buffer, sizeof(buffer));
+							strcpy(buffer, "200 directory changed to ");
+							strcat(buffer, dir);
+							send(client_sd, buffer, sizeof(buffer), 0);
+						}
+						else {
+							bzero(buffer, sizeof(buffer));
+							printf("Failed to change working directory\n");
+							strcpy(buffer, "550 No such file or directory.");
+							send(client_sd, buffer, sizeof(buffer), 0);
+						}
+					}
+					else {
+						bzero(buffer, sizeof(buffer));
+						printf("Not logged in\n");
+						strcpy(buffer, "530 Not logged in.");
+						send(client_sd, buffer, sizeof(buffer), 0);
+					}
+				}
+
 				else { // if the command is invalid
 					bzero(buffer, sizeof(buffer));
 					printf("Invalid command\n");
