@@ -78,6 +78,33 @@ int main()
 			system("pwd");
 		}
 
+		else if (strncmp(buffer, "!CWD ", 5) == 0) {
+			char *dir = buffer + 5;
+			dir[strcspn(dir, "\n")] = 0; // remove trailing newline char from dir
+			char command[256];
+			if (chdir(dir) == 0) { // cannot use system() command because it will change the working directory of the spawned shell, not the program
+				printf("Directory changed to ");
+				printf("%s\n", getcwd(command, sizeof(command))); // not using system() as it cannot recognize the change in directory of the program
+			}
+			else {
+				printf("No such file or directory.\n");
+			}					
+		}
+
+		else if (strcmp(buffer, "PWD") == 0) {
+			send(server_sd,buffer,strlen(buffer),0);
+			bzero(buffer,sizeof(buffer)); //clear the buffer
+			recv(server_sd,buffer,sizeof(buffer),0); //receive message from server
+			printf("%s\n",buffer);
+		}
+
+		else if (strncmp(buffer, "CWD ", 4) == 0) {
+			send(server_sd,buffer,strlen(buffer),0);
+			bzero(buffer,sizeof(buffer)); //clear the buffer
+			recv(server_sd,buffer,sizeof(buffer),0); //receive message from server
+			printf("%s\n",buffer);
+		}
+
 		// if command is anything else, send anyway to receive error
 		else {
 			send(server_sd,buffer,strlen(buffer),0);
