@@ -9,6 +9,7 @@
 #include <sys/select.h>
 
 
+char root[256]; // root directory of code
 int active_users = 0; // number of active users
 
 // create a struct called user with fields username, password, wd (working directory)
@@ -17,6 +18,7 @@ struct user {
 	char password[256];
 	char wd[256];
 	int logIn;
+	int socket; // socket of the user
 };
 
 // create an array of users
@@ -24,6 +26,22 @@ struct user users[10];
 
 // function to authenticate the user
 int user_auth(int client_socket, char username[256]) {
+
+	// checking if the user is already logged in
+	for (int i = 0; i < active_users; i++) {
+		if (strcmp(users[i].username, username) == 0) {
+			printf("User already logged in\n");
+			char buffer[256];
+			bzero(buffer, sizeof(buffer));
+			strcpy(buffer, "400 User already logged in.");
+			send(client_socket, buffer, sizeof(buffer), 0);
+			return 0;
+		}
+	}
+
+	// switching to the root directory
+	chdir(root);
+
 	// open the file ../users.csv
 	FILE *file = fopen("../users.csv", "r");
 	if (file == NULL) {
@@ -31,8 +49,8 @@ int user_auth(int client_socket, char username[256]) {
 		exit(-1);
 	}
 	// read the file line by line
-	char line[256];
-	while (fgets(line, sizeof(line), file)) {
+	char line[256]; // assuming (<username>,<password>) cannot exceed 256 characters
+	while (fread(line, 1, sizeof(line), file) > 0) {
 		// split the line into username and password
 		char *token = strtok(line, ",");
 		char *username_file = token;
@@ -76,6 +94,7 @@ int user_auth(int client_socket, char username[256]) {
 					strcat(cwd, username);
 					strcpy(users[active_users].wd, cwd);
 					users[active_users].logIn = 1;
+					users[active_users].socket = client_socket;
 					active_users++;
 					return 1;
 				}
@@ -88,18 +107,23 @@ int user_auth(int client_socket, char username[256]) {
 			break; // if the command is invalid, break the loop
 		}
 	}
+	
 	char buffer[256];
 	bzero(buffer, sizeof(buffer));
 	strcpy(buffer, "530 Not logged in.");
 	send(client_socket, buffer, sizeof(buffer), 0);
-
 	fclose(file);
 	return 0;
 }
 
 
+
+
 int main()
 {
+	// storing root directory
+	getcwd(root, sizeof(root));
+
 	//socket
 	int server_sd = socket(AF_INET,SOCK_STREAM,0);
 	if(server_sd<0) {
@@ -112,7 +136,7 @@ int main()
 	struct sockaddr_in server_addr;
 	bzero(&server_addr,sizeof(server_addr));
 	server_addr.sin_family = AF_INET;
-	server_addr.sin_port = htons(9021); // specified port
+	server_addr.sin_port = htons(9021); // control channel
 	server_addr.sin_addr.s_addr = inet_addr("127.0.0.1"); // loopback address
 
 	//bind
@@ -178,23 +202,70 @@ int main()
 				else
 				{
 					char buffer[256];
-					bzero(buffer,sizeof(buffer)); //clear the buffer
-					int bytes = recv(fd,buffer,sizeof(buffer),0); //receive message from client
+					bzero(buffer,sizeof(buffer));
+					int bytes = recv(fd,buffer,sizeof(buffer),0);
 					if (bytes == 0) {
 						printf("\nConnection [%d] closed\n", fd);
 						close(fd);
+						// removing the socket from the list of file descriptors that we are watching
+						FD_CLR(fd,&all_sockets);
+						// removing the user from the users array
+						for (int i = 0; i < active_users; i++) {
+							if (users[i].socket == fd) {
+								for (int j = i; j < active_users - 1; j++) {
+									users[j] = users[j + 1];
+								}
+								active_users--;
+							}
+						}
 						break;
 					}
 					printf("\n[%d]> %s\n", fd, buffer);
 
+					int logIn = 0; // bool for if the current user is logged in
+					// matching this fd with the user
+					for (int i = 0; i < active_users; i++) {
+						if (users[i].socket == fd) {
+							userIdx = i;
+							chdir(users[i].wd);
+							if (users[i].logIn == 1) {
+								logIn = 1;
+							}
+						}
+					}
+
+					// // print all the active users
+					// printf("Active users: ");
+					// for (int i = 0; i < active_users; i++) {
+					// 	printf("%s ", users[i].username);
+					// 	printf("%d ", users[i].socket);
+					// }
+					// printf("\n");
+
+					// // print current fd
+					// printf("\nCurrent fd: %d\n", fd);
+
 					// if the command is "USER <username>", authenticate the user
 					if (strncmp(buffer, "USER ", 5) == 0) {
-						char *username = buffer + 5;
-						username[strcspn(username, "\n")] = 0; // remove trailing newline char from username
-						if (user_auth(fd, username) == 1) {
-							userIdx = active_users - 1;
-							// setting cwd as this user's working directory
-							chdir(users[userIdx].wd);
+						if (logIn == 1) {
+							printf("User already logged in\n");
+							bzero(buffer, sizeof(buffer));
+							strcpy(buffer, "230 User logged in, proceed.");
+							send(fd, buffer, sizeof(buffer), 0);
+						}
+						else {
+							char *username = buffer + 5;
+							username[strcspn(username, "\n")] = 0; // remove trailing newline char from username
+							if (user_auth(fd, username) == 1) {
+								// setting userIdx
+								for (int i = 0; i < active_users; i++) {
+									if (strcmp(users[i].username, username) == 0) {
+										userIdx = i;
+									}
+								}
+								// setting cwd as this user's working directory
+								chdir(users[userIdx].wd);
+							}
 						}
 					}
 
@@ -205,12 +276,23 @@ int main()
 						strcpy(buffer, "221 Service closing control connection.");
 						send(fd,buffer,sizeof(buffer),0); //send message to client
 						close(fd);
+						// removing the socket from the list of file descriptors that we are watching
+						FD_CLR(fd,&all_sockets);
+						// removing the user from the users array
+						for (int i = 0; i < active_users; i++) {
+							if (users[i].socket == fd) {
+								for (int j = i; j < active_users - 1; j++) {
+									users[j] = users[j + 1];
+								}
+								active_users--;
+							}
+						}
 						break;
 					}
 
 					else if (strcmp(buffer, "PWD") == 0) {
 						bzero(buffer, sizeof(buffer));
-						if (users[userIdx].logIn == 1) {
+						if (logIn == 1) {
 							printf("Working directory: %s\n", users[userIdx].wd);
 							strcpy(buffer, "257 ");
 							strcat(buffer, users[userIdx].wd);
@@ -224,7 +306,7 @@ int main()
 					}
 
 					else if (strncmp(buffer, "CWD ", 4) == 0) {
-						if (users[userIdx].logIn == 1) {
+						if (logIn == 1) {
 							char *new_wd = buffer + 4;
 							// new_wd[strcspn(new_wd, "\n")] = 0; // remove trailing newline char from dir
 							if (chdir(new_wd) == 0) {
@@ -262,7 +344,6 @@ int main()
 				}
 			}
 		}
-		// nothing else to be done in the parent process so loop back to accept another client
 	}
 
 	//close
