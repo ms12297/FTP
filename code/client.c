@@ -7,6 +7,22 @@
 #include<stdlib.h>
 #include<unistd.h> // header for unix specic functions declarations : fork(), getpid(), getppid()
 #include<stdlib.h> // header for general fcuntions declarations: exit()
+#include<stdint.h> // for uint8_t
+
+// PORT function with args as ip, data_port, and fields array to be filled
+void PORT(char *ip, int data_port, char *fields) {
+
+	int h1, h2, h3, h4, p1, p2;
+	sscanf(ip, "%d.%d.%d.%d", &h1, &h2, &h3, &h4); // parsing the ip address
+
+	// calculating p1 and p2 from the port number and casting to char
+	p1 = data_port / 256;
+	p2 = data_port % 256;
+
+	// storing ints as characters in fields, comma separated
+	sprintf(fields, "%d,%d,%d,%d,%d,%d", h1, h2, h3, h4, p1, p2);
+}
+
 
 
 int main()
@@ -23,7 +39,7 @@ int main()
 	struct sockaddr_in server_addr;
 	bzero(&server_addr,sizeof(server_addr));
 	server_addr.sin_family = AF_INET;
-	server_addr.sin_port = htons(6000); // specified port
+	server_addr.sin_port = htons(9021); // specified port
 	server_addr.sin_addr.s_addr = inet_addr("127.0.0.1"); // loopback address
 
 	//connect
@@ -31,8 +47,13 @@ int main()
         perror("connect");
         exit(-1);
     }
+
+	// storing the port with which client connects to server
+	struct sockaddr_in client_addr;
+	socklen_t client_len = sizeof(client_addr);
+	getsockname(server_sd, (struct sockaddr *) &client_addr, &client_len);
+	int data_port = ntohs(client_addr.sin_port) + 1; // initial data port = control port + 1 (N+1)
 	
-	//accept
 	char buffer[256];
 	printf("Connected to server\n");
 
@@ -103,6 +124,98 @@ int main()
 			bzero(buffer,sizeof(buffer)); //clear the buffer
 			recv(server_sd,buffer,sizeof(buffer),0); //receive message from server
 			printf("%s\n",buffer);
+		}
+
+		else if (strcmp(buffer, "LIST") == 0 || strncmp(buffer, "STOR ", 5) == 0 || strncmp(buffer, "RETR ", 5) == 0) {
+			// storing initial command in new buffer
+			char initial_command[256];
+			bzero(initial_command, sizeof(initial_command));
+			strcpy(initial_command, buffer);
+
+			// calling PORT
+			char fields[64];
+			bzero(fields, sizeof(fields));
+			PORT("127.0.0.1", data_port, fields);
+			
+			// sending "PORT h1,h2,h3,h4,p1,p2" command to server
+			char port_command[256];
+			bzero(port_command, sizeof(port_command));
+			sprintf(port_command, "PORT %s", fields);
+			send(server_sd, port_command, strlen(port_command), 0);
+			bzero(buffer, sizeof(buffer));
+			recv(server_sd, buffer, sizeof(buffer), 0);
+			printf("%s\n", buffer);
+
+			// creating new socket for data transfer
+			int data_sd = socket(AF_INET, SOCK_STREAM, 0);
+			if (data_sd < 0) {
+				perror("socket:");
+				exit(-1);
+			}
+
+			// setting up the data connection
+			struct sockaddr_in data_addr;
+			bzero(&data_addr, sizeof(data_addr));
+			data_addr.sin_family = AF_INET;
+			data_addr.sin_port = htons(data_port);
+			data_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+			data_port++; // incrementing data port for next data transfer
+
+			// bind
+			if (bind(data_sd, (struct sockaddr *)&data_addr, sizeof(data_addr)) < 0) {
+				perror("bind:");
+				exit(-1);
+			}
+
+			// // print port we are listening on, verification
+			// printf("Listening on port %d\n", ntohs(data_addr.sin_port));
+
+			// listen
+			if (listen(data_sd, 5) < 0) {
+				perror("listen:");
+				exit(-1);
+			}
+
+			// sending initial command to server
+			send(server_sd, initial_command, strlen(initial_command), 0);
+			bzero(buffer, sizeof(buffer));
+			recv(server_sd, buffer, sizeof(buffer), 0); // receiving 150 File okay here
+			printf("%s\n", buffer);
+
+			// if 550 file not found error, close data socket and continue
+			if (strncmp(buffer, "550", 3) == 0) {
+				close(data_sd);
+				continue;
+			}
+
+			// accept
+			struct sockaddr_in client_data_addr;
+			socklen_t client_data_len = sizeof(client_data_addr);
+			int client_data_sd = accept(data_sd, (struct sockaddr *)&client_data_addr, &client_data_len);
+			if (client_data_sd < 0) {
+				perror("accept:");
+				exit(-1);
+			}
+
+			// if initial command is LIST or RETR, receiving data from server
+			if (strncmp(initial_command, "LIST", 4) == 0) {
+
+			}
+
+			else if (strncmp(initial_command, "RETR", 4) == 0) {
+				
+		
+			}
+
+			else if (strncmp(initial_command, "STOR", 4) == 0) {
+
+			}
+
+			// closing the data socket
+			close(client_data_sd);
+			close(data_sd);
+
 		}
 
 		// if command is anything else, send anyway to receive error
