@@ -335,6 +335,142 @@ int main()
 						}
 					}
 
+					else if (strncmp(buffer, "PORT ", 5) == 0) {
+						if (logIn == 1) {
+							int pid = fork(); // create a child process to handle the data connection
+							if (pid == 0) {
+								// extract the IP and port from the PORT h1,h2,h3,h4,p1,p2 command
+								int h1, h2, h3, h4, p1, p2;
+								char *fields = buffer + 5;
+								char *token = strtok(fields, ",");
+								h1 = atoi(token);
+								token = strtok(NULL, ",");
+								h2 = atoi(token);
+								token = strtok(NULL, ",");
+								h3 = atoi(token);
+								token = strtok(NULL, ",");
+								h4 = atoi(token);
+								token = strtok(NULL, ",");
+								p1 = atoi(token);
+								token = strtok(NULL, ",");
+								p2 = atoi(token);
+
+								// ip string and data_port int
+								char ip[256];
+								bzero(ip, sizeof(ip));
+								sprintf(ip, "%d.%d.%d.%d", h1, h2, h3, h4);
+								int data_port = p1 * 256 + p2;
+
+								// print the IP and port
+								printf("IP: %s\n", ip);
+								printf("Port: %d\n", data_port);
+
+								// send acknowledgement to client
+								bzero(buffer, sizeof(buffer));
+								strcpy(buffer, "200 PORT command successful.");
+								send(fd, buffer, sizeof(buffer), 0);
+
+								// create the data connection
+								int data_sd = socket(AF_INET, SOCK_STREAM, 0);
+								if (data_sd < 0) {
+									perror("socket:");
+									exit(-1);
+								}
+
+								// the local port
+								struct sockaddr_in local_addr;
+								bzero(&local_addr, sizeof(local_addr));
+								local_addr.sin_family = AF_INET;
+								local_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+								local_addr.sin_port = htons(9020); // the data port server will connect from
+
+								// bind to the local port i.e. 9020
+								if (bind(data_sd, (struct sockaddr*)&local_addr, sizeof(local_addr)) < 0) {
+									perror("bind");
+									exit(-1);
+								}
+
+								// the server (client) address to connect to
+								struct sockaddr_in data_addr;
+								bzero(&data_addr, sizeof(data_addr));
+								data_addr.sin_family = AF_INET;
+								data_addr.sin_port = htons(data_port);
+								data_addr.sin_addr.s_addr = inet_addr(ip);
+
+								// receive the command on control connection
+								bzero(buffer, sizeof(buffer));
+								recv(fd, buffer, sizeof(buffer), 0);
+								printf("\n[%d]> %s\n", fd, buffer);
+
+								// processing received command (LIST, RETR, STOR)
+							    if (strncmp(buffer, "LIST", 4) == 0) {
+									
+									// here, we tried simply using system("ls > temp.txt") to redirect ls output to a file but it included the temp.txt as well
+									// so we shifted to creating a pipe instead and redirecting the output of ls to the write end of the pipe
+
+									// storing the output of fork+exec(ls) command in a pipe
+									int pipefd[2];
+									pipe(pipefd);
+									int pid = fork();
+									if (pid == 0) {
+										close(pipefd[0]); // close the read end of the pipe
+										dup2(pipefd[1], 1); // redirect stdout to the write end of the pipe
+										close(pipefd[1]); // close the write end of the pipe
+										execlp("ls", "ls", NULL); // execute the ls command
+									}
+									else {
+										close(pipefd[1]); // close the write end of the pipe
+										wait(NULL); // wait for the child process to finish
+
+										// send acknowledgement to client
+										bzero(buffer, sizeof(buffer));
+										strcpy(buffer, "150 File status okay; about to open data connection.");
+										send(fd, buffer, sizeof(buffer), 0);
+
+										// connect to the client
+										if (connect(data_sd, (struct sockaddr*)&data_addr, sizeof(data_addr)) < 0) {
+											perror("connect");
+											exit(-1);
+										}
+
+										char line[256];
+										while (read(pipefd[0], line, sizeof(line)) > 0) { // while any bytes are read
+											bzero(buffer, sizeof(buffer));
+											strcpy(buffer, line);
+											send(data_sd, buffer, sizeof(buffer), 0);
+										}
+										close(pipefd[0]);
+
+										// close the data connection
+										close(data_sd);
+
+										// send acknowledgement to client
+										bzero(buffer, sizeof(buffer));
+										strcpy(buffer, "226 Transfer complete.");
+										send(fd, buffer, sizeof(buffer), 0);
+									}
+								}
+
+								else if (strncmp(buffer, "RETR ", 5) == 0) {
+									
+								}
+
+								else if (strncmp(buffer, "STOR ", 5) == 0) {
+									
+								}
+								// terminate the forked child process
+								exit(0);
+							}
+
+						}
+						else {
+							bzero(buffer, sizeof(buffer));
+							printf("Not logged in\n");
+							strcpy(buffer, "530 Not logged in.");
+							send(fd, buffer, sizeof(buffer), 0);
+						}
+					}
+
 					else { // if the command is invalid
 						bzero(buffer, sizeof(buffer));
 						printf("Invalid command\n");
