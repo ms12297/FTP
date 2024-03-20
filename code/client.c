@@ -200,7 +200,15 @@ int main()
 
 			// if initial command is LIST or RETR, receiving data from server
 			if (strncmp(initial_command, "LIST", 4) == 0) {
-
+				bzero(buffer, sizeof(buffer));
+				while (recv(client_data_sd, buffer, sizeof(buffer), 0) > 0) {
+					printf("%s", buffer);
+					bzero(buffer, sizeof(buffer)); // clearing buffer just in case there is more data
+				}
+				// receive completion message from server
+				bzero(buffer, sizeof(buffer));
+				recv(server_sd, buffer, sizeof(buffer), 0);
+				printf("%s\n", buffer);
 			}
 
 			else if (strncmp(initial_command, "RETR", 4) == 0) {
