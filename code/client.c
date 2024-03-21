@@ -213,11 +213,55 @@ int main()
 
 			else if (strncmp(initial_command, "RETR", 4) == 0) {
 				
-		
+				// creating file to write to
+				char *filename = initial_command + 5;
+				filename[strcspn(filename, "\n")] = 0; // remove trailing newline char from filename
+				FILE *file = fopen(filename, "w");
+				if (file == NULL) {
+					perror("fopen:");
+					exit(-1);
+				}
+
+				// receiving data from server and appending to file
+				bzero(buffer, sizeof(buffer));
+				size_t bytes_received; // number of bytes received
+				while ((bytes_received = recv(client_data_sd, buffer, sizeof(buffer), 0)) > 0) { // while any bytes are received
+					fwrite(buffer, 1, bytes_received, file);
+					bzero(buffer, sizeof(buffer)); // clearing buffer just in case there is more data
+				}
+				fclose(file);
+
+				// receive completion message from server
+				bzero(buffer, sizeof(buffer));
+				recv(server_sd, buffer, sizeof(buffer), 0);
+				printf("%s\n", buffer);				
 			}
 
 			else if (strncmp(initial_command, "STOR", 4) == 0) {
+				// open file
+				char *filename = initial_command + 5;
+				filename[strcspn(filename, "\n")] = 0; // remove trailing newline char from filename
+				FILE *file = fopen(filename, "r");
+				if (file == NULL) {
+					perror("fopen:");
+					exit(-1); // ??? handle this error
+				}
+				
+				// reading chunks and sending them to the server
+				bzero(buffer, sizeof(buffer));
+				size_t bytes_read; // number of bytes read
+				while ((bytes_read = fread(buffer, 1, sizeof(buffer), file)) > 0) { // while any bytes are read
+					send(client_data_sd, buffer, bytes_read, 0);
+					bzero(buffer, sizeof(buffer)); // clearing buffer just in case there is more data
+					printf("Sending data...\n");
+				}
+				printf("Data sent.\n");
+				fclose(file);
 
+				// receive completion message from server
+				bzero(buffer, sizeof(buffer));
+				recv(server_sd, buffer, sizeof(buffer), 0);
+				printf("%s\n", buffer);
 			}
 
 			// closing the data socket
