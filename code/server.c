@@ -452,11 +452,92 @@ int main()
 								}
 
 								else if (strncmp(buffer, "RETR ", 5) == 0) {
-									
+									// open the file
+									char *filename = buffer + 5;
+									filename[strcspn(filename, "\n")] = 0; // remove trailing newline char from filename
+									FILE *file = fopen(filename, "r");
+									if (file == NULL) {
+										perror("fopen");
+										bzero(buffer, sizeof(buffer));
+										strcpy(buffer, "550 No such file or directory.");
+										send(fd, buffer, sizeof(buffer), 0);
+									}
+									else {
+										// send acknowledgement to client
+										bzero(buffer, sizeof(buffer));
+										strcpy(buffer, "150 File status okay; about to open data connection.");
+										send(fd, buffer, sizeof(buffer), 0);
+
+										// connect to the client
+										if (connect(data_sd, (struct sockaddr*)&data_addr, sizeof(data_addr)) < 0) {
+											perror("connect");
+											exit(-1);
+										}
+
+										// reading chunks and sending them to the client
+										bzero(buffer, sizeof(buffer));
+										size_t bytes_read; // number of bytes read, size_t type returned by fread, same as int?
+										while ((bytes_read = fread(buffer, 1, sizeof(buffer), file)) > 0) { // while any bytes are read
+											send(data_sd, buffer, bytes_read, 0);
+											bzero(buffer, sizeof(buffer));
+										}
+										fclose(file);
+
+										// close the data connection
+										close(data_sd);
+
+										// send acknowledgement to client
+										bzero(buffer, sizeof(buffer));
+										strcpy(buffer, "226 Transfer complete.");
+										send(fd, buffer, sizeof(buffer), 0);
+									}
+
 								}
 
 								else if (strncmp(buffer, "STOR ", 5) == 0) {
-									
+									// creating file to write to
+									char *filename = buffer + 5;
+									filename[strcspn(filename, "\n")] = 0; // remove trailing newline char from filename
+									FILE *file = fopen(filename, "w");
+									if (file == NULL) {
+										perror("fopen");
+										bzero(buffer, sizeof(buffer));
+										strcpy(buffer, "550 No such file or directory.");
+										send(fd, buffer, sizeof(buffer), 0);
+									}
+
+									else {
+										// send acknowledgement to client
+										bzero(buffer, sizeof(buffer));
+										strcpy(buffer, "150 File status okay; about to open data connection.");
+										send(fd, buffer, sizeof(buffer), 0);
+
+										// connect to the client
+										if (connect(data_sd, (struct sockaddr*)&data_addr, sizeof(data_addr)) < 0) {
+											perror("connect");
+											exit(-1);
+										}
+
+										// receiving data from client and appending to file
+										bzero(buffer, sizeof(buffer));
+										size_t bytes_received; // number of bytes received
+										while ((bytes_received = recv(data_sd, buffer, sizeof(buffer), 0)) > 0) { // while any bytes are received
+											printf("1\n");
+											fwrite(buffer, 1, bytes_received, file);
+											bzero(buffer, sizeof(buffer));
+											printf("Receiving data\n");
+										}
+										printf("File received\n");
+										fclose(file);
+
+										// close the data connection
+										close(data_sd);										
+										
+										// send acknowledgement to client
+										bzero(buffer, sizeof(buffer));
+										strcpy(buffer, "226 Transfer complete.");
+										send(fd, buffer, sizeof(buffer), 0);
+									}
 								}
 								// terminate the forked child process
 								exit(0);
