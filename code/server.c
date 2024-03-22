@@ -522,12 +522,9 @@ int main()
 										bzero(buffer, sizeof(buffer));
 										size_t bytes_received; // number of bytes received
 										while ((bytes_received = recv(data_sd, buffer, sizeof(buffer), 0)) > 0) { // while any bytes are received
-											printf("1\n");
 											fwrite(buffer, 1, bytes_received, file);
 											bzero(buffer, sizeof(buffer));
-											printf("Receiving data\n");
 										}
-										printf("File received\n");
 										fclose(file);
 
 										// close the data connection
@@ -567,3 +564,9 @@ int main()
 	close(server_sd);
 	return 0;
 }
+
+
+// what is the unreliability? 
+// what is session reset if client disconnects?
+// how to support concurrent connections?
+// does the file in STOR or RETR get deleted from the source?
