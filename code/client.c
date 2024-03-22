@@ -209,6 +209,10 @@ int main()
 				bzero(buffer, sizeof(buffer));
 				recv(server_sd, buffer, sizeof(buffer), 0);
 				printf("%s\n", buffer);
+
+				// closing the data socket
+				close(client_data_sd);
+				close(data_sd);
 			}
 
 			else if (strncmp(initial_command, "RETR", 4) == 0) {
@@ -230,6 +234,10 @@ int main()
 					bzero(buffer, sizeof(buffer)); // clearing buffer just in case there is more data
 				}
 				fclose(file);
+
+				// closing the data socket
+				close(client_data_sd);
+				close(data_sd);
 
 				// receive completion message from server
 				bzero(buffer, sizeof(buffer));
@@ -253,20 +261,18 @@ int main()
 				while ((bytes_read = fread(buffer, 1, sizeof(buffer), file)) > 0) { // while any bytes are read
 					send(client_data_sd, buffer, bytes_read, 0);
 					bzero(buffer, sizeof(buffer)); // clearing buffer just in case there is more data
-					printf("Sending data...\n");
 				}
-				printf("Data sent.\n");
 				fclose(file);
+
+				// closing the data socket - IMP to close here instead of outside the else ifs to let server know to stop recv loop
+				close(client_data_sd);
+				close(data_sd);
 
 				// receive completion message from server
 				bzero(buffer, sizeof(buffer));
 				recv(server_sd, buffer, sizeof(buffer), 0);
 				printf("%s\n", buffer);
 			}
-
-			// closing the data socket
-			close(client_data_sd);
-			close(data_sd);
 
 		}
 
