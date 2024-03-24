@@ -50,12 +50,13 @@ int user_auth(int client_socket, char username[256]) {
 	}
 	// read the file line by line
 	char line[256]; // assuming (<username>,<password>) cannot exceed 256 characters
-	while (fread(line, 1, sizeof(line), file) > 0) {
+	while (fgets(line, sizeof(line), file)) {
 		// split the line into username and password
 		char *token = strtok(line, ",");
 		char *username_file = token;
 		token = strtok(NULL, ",");
 		char *password_file = token;
+		
 		// if the username is valid, request for password
 		if (strcmp(username, username_file) == 0) {
 			printf("\nSuccessful username verification\n");
@@ -109,6 +110,7 @@ int user_auth(int client_socket, char username[256]) {
 	}
 	
 	char buffer[256];
+	printf("HERE\n");
 	bzero(buffer, sizeof(buffer));
 	strcpy(buffer, "530 Not logged in.");
 	send(client_socket, buffer, sizeof(buffer), 0);
@@ -191,8 +193,14 @@ int main()
 					int client_sd = accept(server_sd,(struct sockaddr *) &cliaddr, &len);
 					
 					// print connection details
-					printf("Connection established with user %d\n", client_sd);
+					printf("\nConnection established with user %d\n", client_sd);
 					printf("Their port: %d\n", ntohs(cliaddr.sin_port));
+
+					// sending welcome message
+					char buffer[256];
+					bzero(buffer,sizeof(buffer));
+					strcpy(buffer, "220 Service ready for new user.");
+					send(client_sd,buffer,sizeof(buffer),0);
 					
 					// add the newly accepted socket to the set of all sockets that we are watching
 					FD_SET(client_sd,&all_sockets);
@@ -267,6 +275,12 @@ int main()
 								chdir(users[userIdx].wd);
 							}
 						}
+					}
+
+					else if (strncmp(buffer, "PASS ", 5) == 0) {
+						bzero(buffer, sizeof(buffer));
+						strcpy(buffer, "503 Bad sequence of commands.");
+						send(fd, buffer, sizeof(buffer), 0);
 					}
 
 					// if the command is "BYE!", close the connection
@@ -377,6 +391,9 @@ int main()
 									exit(-1);
 								}
 
+								// allowing reuse of address
+								setsockopt(data_sd, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value));
+
 								// the local port
 								struct sockaddr_in local_addr;
 								bzero(&local_addr, sizeof(local_addr));
@@ -427,19 +444,22 @@ int main()
 										strcpy(buffer, "150 File status okay; about to open data connection.");
 										send(fd, buffer, sizeof(buffer), 0);
 
+										printf("Connecting to Client Transfer Socket\n");
 										// connect to the client
 										if (connect(data_sd, (struct sockaddr*)&data_addr, sizeof(data_addr)) < 0) {
 											perror("connect");
 											exit(-1);
 										}
+										printf("Connection Successful\n");
 
-										char line[256];
-										while (read(pipefd[0], line, sizeof(line)) > 0) { // while any bytes are read
+										// reading from the read end of the pipe and sending to the client
+										bzero(buffer, sizeof(buffer)); // clear the buffer
+										ssize_t bytes_read; // number of bytes read
+										while ((bytes_read = read(pipefd[0], buffer, sizeof(buffer))) > 0) { // while any bytes are read
+											send(data_sd, buffer, bytes_read, 0);
 											bzero(buffer, sizeof(buffer));
-											strcpy(buffer, line);
-											send(data_sd, buffer, sizeof(buffer), 0);
 										}
-										close(pipefd[0]);
+										close(pipefd[0]); // close the read end of the pipe
 
 										// close the data connection
 										close(data_sd);
@@ -448,6 +468,8 @@ int main()
 										bzero(buffer, sizeof(buffer));
 										strcpy(buffer, "226 Transfer complete.");
 										send(fd, buffer, sizeof(buffer), 0);
+
+										printf("Transfer Complete\n");
 									}
 								}
 
@@ -468,11 +490,13 @@ int main()
 										strcpy(buffer, "150 File status okay; about to open data connection.");
 										send(fd, buffer, sizeof(buffer), 0);
 
+										printf("Connecting to Client Transfer Socket\n");
 										// connect to the client
 										if (connect(data_sd, (struct sockaddr*)&data_addr, sizeof(data_addr)) < 0) {
 											perror("connect");
 											exit(-1);
 										}
+										printf("Connection Successful\n");
 
 										// reading chunks and sending them to the client
 										bzero(buffer, sizeof(buffer));
@@ -490,6 +514,8 @@ int main()
 										bzero(buffer, sizeof(buffer));
 										strcpy(buffer, "226 Transfer complete.");
 										send(fd, buffer, sizeof(buffer), 0);
+
+										printf("Transfer Complete\n");
 									}
 
 								}
@@ -512,11 +538,13 @@ int main()
 										strcpy(buffer, "150 File status okay; about to open data connection.");
 										send(fd, buffer, sizeof(buffer), 0);
 
+										printf("Connecting to Client Transfer Socket\n");
 										// connect to the client
 										if (connect(data_sd, (struct sockaddr*)&data_addr, sizeof(data_addr)) < 0) {
 											perror("connect");
 											exit(-1);
 										}
+										printf("Connection Successful\n");
 
 										// receiving data from client and appending to file
 										bzero(buffer, sizeof(buffer));
@@ -534,10 +562,16 @@ int main()
 										bzero(buffer, sizeof(buffer));
 										strcpy(buffer, "226 Transfer complete.");
 										send(fd, buffer, sizeof(buffer), 0);
+
+										printf("Transfer Complete\n");
 									}
 								}
 								// terminate the forked child process
 								exit(0);
+							}
+							else {
+								// wait for the child process to finish
+								wait(NULL);
 							}
 
 						}
@@ -564,9 +598,3 @@ int main()
 	close(server_sd);
 	return 0;
 }
-
-
-// what is the unreliability? 
-// what is session reset if client disconnects?
-// how to support concurrent connections?
-// does the file in STOR or RETR get deleted from the source?
